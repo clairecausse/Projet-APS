@@ -1,0 +1,5 @@
+# Dossier de données
+data_nappes/
+
+# macOS
+.DS_Store
