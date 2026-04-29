@@ -1,0 +1,268 @@
+\documentclass[11pt, a4paper]{article}
+
+% ─── Packages ────────────────────────────────────────────────────────────────
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage[top=2cm, bottom=2cm, left=2.5cm, right=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{array}
+\usepackage{colortbl}
+\usepackage{parskip}
+
+% ─── Couleurs ────────────────────────────────────────────────────────────────
+\definecolor{bleufonce}{RGB}{26, 55, 108}
+\definecolor{bleuclair}{RGB}{39, 111, 191}
+\definecolor{vert}{RGB}{46, 134, 90}
+\definecolor{orange}{RGB}{224, 123, 34}
+\definecolor{violet}{RGB}{106, 61, 154}
+\definecolor{grisclair}{RGB}{242, 244, 248}
+\definecolor{entete}{RGB}{26, 55, 108}
+
+% ─── Style des titres ────────────────────────────────────────────────────────
+\titleformat{\section}
+  {\large\bfseries\color{bleufonce}}
+  {\thesection.}{0.5em}{}
+  [\vspace{-0.3em}\textcolor{bleufonce}{\rule{\linewidth}{0.8pt}}]
+
+\titleformat{\subsection}
+  {\normalsize\bfseries\color{bleuclair}}
+  {\thesubsection}{0.5em}{}
+
+\titlespacing{\section}{0pt}{14pt}{6pt}
+\titlespacing{\subsection}{0pt}{8pt}{3pt}
+
+% ─── Commandes tableaux ──────────────────────────────────────────────────────
+\newcommand{\entetetab}[1]{\cellcolor{entete}\textcolor{white}{\textbf{#1}}}
+\newcommand{\ligneA}[1]{\cellcolor{grisclair}{#1}}
+
+% ─── Liens PDF ───────────────────────────────────────────────────────────────
+\hypersetup{
+  colorlinks=true,
+  linkcolor=bleufonce,
+  urlcolor=bleuclair,
+  pdftitle={Rapport — Prévision des nappes phréatiques},
+}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{document}
+
+% ─── Titre ───────────────────────────────────────────────────────────────────
+\begin{center}
+  {\LARGE\bfseries\color{bleufonce}
+    Prévision du niveau des nappes phréatiques\\[4pt]
+    par réseaux de neurones}\\[8pt]
+  {\normalsize Marius \quad — \quad Master 1 \quad — \quad 2025/2026}
+\end{center}
+
+\vspace{4pt}
+\textcolor{bleufonce}{\rule{\linewidth}{1.2pt}}
+\vspace{6pt}
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Contexte et données}
+% ═════════════════════════════════════════════════════════════════════════════
+
+L'objectif est de prédire le niveau des nappes phréatiques (\textbf{GWL}, en mètres)
+à partir de variables environnementales mesurées mensuellement sur des puits australiens.
+
+\subsection{Jeu de données}
+
+\begin{itemize}
+  \setlength\itemsep{2pt}
+  \item \textbf{2\,510 fichiers CSV} — un par puit — couvrant l'ensemble du territoire australien
+  \item \textbf{8 régions :} VIC (1\,113 puits), NSW (687), WA (262), QLD (203),
+        SA (198), TAS (19), NT (19), ACT (9)
+  \item \textbf{6 variables par puit :} GWL (cible), Date, P (précipitations mm/mois),
+        T (température °C), ET (évapotranspiration mm/mois), NDVI (indice de végétation)
+  \item \textbf{OUVRAGES.csv :} identifiant, latitude, longitude et région de chaque puit
+\end{itemize}
+
+\textit{Note : de nombreux puits présentent des valeurs manquantes (NaN) dans la colonne GWL,
+réduisant le nombre de puits exploitables selon les parties.}
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Partie 1 — Visualisation}
+% ═════════════════════════════════════════════════════════════════════════════
+
+\subsection{Approche}
+
+Une fonction générique \texttt{plot\_well(well\_id)} a été développée pour visualiser
+n'importe quel puit. Elle génère deux figures de 5 sous-graphiques chacune (un par variable) :
+
+\begin{itemize}
+  \setlength\itemsep{2pt}
+  \item \textbf{Figure A — Valeurs brutes :} courbes avec les unités réelles
+        (m, mm/mois, °C, sans unité)
+  \item \textbf{Figure B — Valeurs normalisées :} z-score appliqué colonne par colonne,
+        permettant de comparer des variables d'unités différentes sur un même axe
+\end{itemize}
+
+La normalisation z-score est définie par :
+\[
+  \tilde{x} = \frac{x - \mu}{\sigma}
+  \qquad \text{avec } \mu = \text{moyenne},\ \sigma = \text{écart-type de la séquence}
+\]
+
+La fonction \texttt{plot\_sample()} sélectionne automatiquement $n$ puits par région
+via \texttt{OUVRAGES.csv} et sauvegarde les graphiques au format PNG.
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Partie 2a — Modèle LSTM générique}
+% ═════════════════════════════════════════════════════════════════════════════
+
+\subsection{Approche}
+
+Un unique réseau LSTM est entraîné sur l'ensemble des puits australiens (modèle générique).
+Il apprend à prédire GWL à partir des variables environnementales passées.
+
+\begin{itemize}
+  \setlength\itemsep{2pt}
+  \item \textbf{Découpage train/test :} toute la chronique moins les 12 derniers mois
+        pour l'entraînement, les 12 derniers mois pour le test (conforme aux consignes)
+  \item \textbf{Features d'entrée :} P, T, ET, NDVI + latitude normalisée + longitude
+        normalisée (6 variables)
+  \item \textbf{Cible :} GWL au mois suivant
+  \item \textbf{Séquences glissantes} de 12 mois (\texttt{SEQ\_LEN = 12})
+  \item \textbf{Normalisation z-score} par puit et par variable, calculée sur les données
+        d'entraînement uniquement
+\end{itemize}
+
+\subsection{Architecture}
+
+\begin{itemize}
+  \setlength\itemsep{2pt}
+  \item Type : \textbf{LSTM} (Long Short-Term Memory) — réseau récurrent avec mémoire
+        à long terme
+  \item Configuration finale (issue du grid search) : 3 couches, hidden = 128,
+        dropout = 0.2
+  \item Couche de sortie : fully connected ($128 \to 1$) — prédit une valeur scalaire GWL
+  \item Optimiseur : Adam \quad|\quad Fonction de perte : MSE
+\end{itemize}
+
+\subsection{Grid Search — 108 combinaisons testées}
+
+Recherche exhaustive sur la grille suivante, résultats sauvegardés dans
+\texttt{grid\_search\_results.csv} :
+
+\vspace{6pt}
+\begin{center}
+\begin{tabular}{>{\bfseries}lll}
+  \toprule
+  \entetetab{Hyperparamètre} & \entetetab{Valeurs testées} & \entetetab{Meilleure valeur} \\
+  \midrule
+  \ligneA{hidden (neurones/couche)} & \ligneA{64, 128, 256}       & \ligneA{128}   \\
+  n\_layers (couches LSTM)          & 1, 2, 3                     & 3              \\
+  \ligneA{lr (learning rate)}       & \ligneA{1e-3, 5e-4, 1e-4}  & \ligneA{5e-4}  \\
+  batch\_size                        & 256, 512                    & 512            \\
+  \ligneA{epochs}                   & \ligneA{30, 50}             & \ligneA{30}    \\
+  \bottomrule
+\end{tabular}
+\end{center}
+\vspace{6pt}
+
+\subsection{Optimisation GPU}
+
+Le dataset complet a été préchargé en VRAM (RTX 5070 Ti — 16 Go) sous forme de tenseurs
+PyTorch. Le batching est effectué directement sur la GPU via \texttt{torch.randperm()},
+éliminant tout transfert CPU $\to$ GPU pendant l'entraînement.
+
+\subsection{Résultats — 854 puits}
+
+\vspace{4pt}
+\begin{center}
+\begin{tabular}{lrrr}
+  \toprule
+  \entetetab{Métrique} & \entetetab{Moyenne} & \entetetab{Écart-type} & \entetetab{Médiane} \\
+  \midrule
+  \ligneA{RMSE (m)} & \ligneA{0.805} & \ligneA{$\pm$0.968} & \ligneA{0.440} \\
+  MAE (m)           & 0.686          & $\pm$0.869          & 0.356          \\
+  \bottomrule
+\end{tabular}
+\end{center}
+\vspace{4pt}
+
+\textit{La médiane est privilégiée : l'écart-type élevé indique la présence de quelques puits
+très difficiles à prédire qui tirent la moyenne vers le haut.}
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Partie 2b — Chronos 2 (Foundation Model)}
+% ═════════════════════════════════════════════════════════════════════════════
+
+\subsection{Approche}
+
+Utilisation du modèle pré-entraîné \texttt{amazon/chronos-bolt-small} issu de la librairie
+\texttt{chronos-forecasting} (v2.2.2). Aucun entraînement sur nos données.
+
+\begin{itemize}
+  \setlength\itemsep{2pt}
+  \item \textbf{Modèle univarié :} seul l'historique GWL est utilisé comme contexte
+        (pas P, T, ET, NDVI)
+  \item \textbf{Prédiction zero-shot :} le modèle prédit directement sans fine-tuning
+  \item \textbf{Contexte :} toutes les valeurs GWL non-NaN avant les 12 derniers mois
+  \item \textbf{Prédiction probabiliste :} $N$ scénarios générés $\to$ médiane retenue
+        comme prédiction finale
+  \item Traitement par batch de 32 puits en parallèle sur GPU
+  \item Critère d'inclusion : minimum 24 mois de GWL non-NaN dans la période d'entraînement
+\end{itemize}
+
+\subsection{Résultats — 1\,174 puits}
+
+\vspace{4pt}
+\begin{center}
+\begin{tabular}{lrrr}
+  \toprule
+  \entetetab{Métrique} & \entetetab{Moyenne} & \entetetab{Écart-type} & \entetetab{Médiane} \\
+  \midrule
+  \ligneA{RMSE (m)} & \ligneA{0.673} & \ligneA{$\pm$0.973} & \ligneA{0.301} \\
+  MAE (m)           & 0.578          & $\pm$0.847          & 0.248          \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Comparaison et conclusion}
+% ═════════════════════════════════════════════════════════════════════════════
+
+\vspace{4pt}
+\begin{center}
+\begin{tabular}{lrrr}
+  \toprule
+  \entetetab{Métrique} & \entetetab{LSTM (2a)} & \entetetab{Chronos 2 (2b)}
+    & \entetetab{Gain} \\
+  \midrule
+  \ligneA{RMSE moyen (m)}  & \ligneA{0.805} & \ligneA{0.673}   & \ligneA{\textcolor{vert}{$-16\,\%$}} \\
+  MAE moyen (m)            & 0.686          & 0.578            & \textcolor{vert}{$-16\,\%$}          \\
+  \ligneA{RMSE médian (m)} & \ligneA{0.440} & \ligneA{0.301}   & \ligneA{\textcolor{vert}{$-32\,\%$}} \\
+  MAE médian (m)           & 0.356          & 0.248            & \textcolor{vert}{$-30\,\%$}          \\
+  \ligneA{Puits évalués}   & \ligneA{854}   & \ligneA{1\,174}  & \ligneA{—}                           \\
+  \bottomrule
+\end{tabular}
+\end{center}
+\vspace{6pt}
+
+Chronos 2 surpasse le LSTM sur l'ensemble des métriques, avec une réduction d'erreur
+de 30 à 32\,\% sur les médianes. Ce résultat est d'autant plus remarquable que :
+
+\begin{itemize}
+  \setlength\itemsep{2pt}
+  \item Chronos n'utilise que l'historique GWL (univarié), sans accès aux variables
+        météo ni GPS
+  \item Aucun entraînement sur les données australiennes n'a été effectué (zero-shot)
+  \item Le LSTM dispose pourtant de 6 features d'entrée et de 30 epochs d'entraînement
+\end{itemize}
+
+\textbf{Explication :} les nappes phréatiques présentent des patterns temporels réguliers
+(cycles saisonniers, tendances lentes) que Chronos 2 reconnaît grâce à son pré-entraînement
+sur des milliers de séries temporelles diverses. Le LSTM doit apprendre ces patterns depuis
+zéro avec un volume de données relatif limité.
+
+\textit{Limite de la comparaison :} les ensembles de puits évalués diffèrent (854 pour le
+LSTM, 1\,174 pour Chronos) en raison de critères d'inclusion différents. Une comparaison
+stricte sur le même sous-ensemble renforcerait la validité des conclusions.
+
+\end{document}
